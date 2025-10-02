@@ -1,0 +1,35 @@
+# ===== CUDA build artifacts =====
+*.o
+*.out
+*.exe
+*.bin
+*.cubin
+*.ptx
+*.fatbin
+output.bin
+main
+
+# ===== Ignore bin folders =====
+week_01/**/bin/
+week_02/**/bin/
+week_03/**/bin/
+week_04/**/bin/
+
+# ===== Debug/Profiling =====
+*.nvvp
+*.prof
+*.log
+
+# ===== Python cache =====
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== Editors =====
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===== macOS system files =====
+.DS_Store
