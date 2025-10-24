@@ -1,5 +1,3 @@
-package week_02;
-
 import java.io.*;
 import java.nio.*;
 
