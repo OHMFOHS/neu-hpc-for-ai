@@ -11,18 +11,20 @@
  #define WARP_SIZE 32
  
  // ---------------- Utility ----------------
+ //return max number in array
  __device__ inline float rowmax(const float* s, int n){
      float m = -FLT_MAX;
      for(int i=0;i<n;i++) m = fmaxf(m, s[i]);
      return m;
  }
+ // return row sum
  __device__ inline float rowsum(const float* s, int n){
      float x = 0.f;
      for(int i=0;i<n;i++) x += s[i];
      return x;
  }
  
- // Forward kernel (online softmax + delayed normalization)
+ // flashattention 2 kernel
  __global__ void flashattn2_fwd_kernel(
      const float* __restrict__ Q,
      const float* __restrict__ K,
@@ -30,7 +32,8 @@
      float* __restrict__ O,
      float* __restrict__ L,
      int B, int H, int N, int d, bool causal)
- {
+ {  
+    // Row tiling
      int br_idx = blockIdx.x;
      int h = blockIdx.y;
      int b = blockIdx.z;
@@ -38,28 +41,28 @@
      int row_start = br_idx * BLOCK_M;
      if(row_start >= N) return;
      int br = min(BLOCK_M, N - row_start);
- 
+    // move pointer to current block 
      const float* Qbh = Q + ((b*H + h)*N*d);
      const float* Kbh = K + ((b*H + h)*N*d);
      const float* Vbh = V + ((b*H + h)*N*d);
      float* Obh = O + ((b*H + h)*N*d);
      float* Lbh = L + ((b*H + h)*N);
- 
+    // put tiled K/V in shared memory
      extern __shared__ float shared[];
      float* Ks = shared;
      float* Vs = Ks + BLOCK_N * d;
- 
+    //One thread is responsible for an entire row of queries
      int tid = threadIdx.x;
      if(tid >= br) return;
  
      float Qi[D];
      for(int k=0;k<d;k++)
          Qi[k] = Qbh[(row_start + tid)*d + k];
- 
+    //online softmax state
      float Oi_num[D] = {0.f};
      float mi = -FLT_MAX;
      float ell = 0.f;
- 
+    //iterate Column tiles
      for(int col_start=0; col_start<N; col_start+=BLOCK_N){
          int bc = min(BLOCK_N, N - col_start);
  
@@ -93,7 +96,7 @@
              block_sum[j] = e;
              e_sum += e;
          }
- 
+         //update Oi_num
          for(int k=0;k<d;k++)
              Oi_num[k] *= scale;
          for(int j=0;j<bc;j++){
@@ -105,12 +108,14 @@
          mi = m_new;
          __syncthreads();
      }
- 
+     //normalize and logsumexp
      for(int k=0;k<d;k++)
          Obh[(row_start+tid)*d + k] = Oi_num[k] / ell;
      Lbh[row_start+tid] = logf(ell) + mi;
  }
  
+
+
  // CPU baseline for validation
  void cpu_attention_ref(const std::vector<float>& Q,
                         const std::vector<float>& K,
@@ -138,6 +143,7 @@
      }
  }
  
+
  int main(){
      int B=1,H=1,N=64,d=D;
      size_t sz = B*H*N*d*sizeof(float);
@@ -152,7 +158,8 @@
          K[i]=(float)((i*3)%17)/17.0f;
          V[i]=(float)((i*7)%19)/19.0f;
      }
- 
+     
+     // define grid size and call kernel
      dim3 grid((N+BLOCK_M-1)/BLOCK_M,H,B);
      dim3 block(64);
      size_t smem = (BLOCK_N*d*2)*sizeof(float);
